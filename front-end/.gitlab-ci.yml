@@ -1,0 +1,82 @@
+stages:
+  - install 
+  - test
+  - build
+  - deploy
+
+# to cache both npm modules and Cypress binary we use environment variables
+# to point at the folders we can list as paths in "cache" job settings
+variables:
+  # test
+  npm_config_cache: "$CI_PROJECT_DIR/.npm"
+  CYPRESS_CACHE_FOLDER: "$CI_PROJECT_DIR/cache/Cypress"
+  # build
+  DOCKER_HOST: tcp://docker:2375
+  IMAGE: "eu.gcr.io/${PROJECT}/${CI_PROJECT_NAME}:${CI_COMMIT_SHORT_SHA}"  
+
+.before_script_template:
+  before_script:
+    - echo ${INFRA_ADMIN_CREDENTIALS} | base64 -d > ./infra-admin-credentials.json
+    - > 
+      gcloud auth activate-service-account \
+        --key-file="./infra-admin-credentials.json" \
+        --project=${PROJECT}
+    - gcloud config set core/project   ${PROJECT}
+    - gcloud config set compute/region ${REGION}
+
+install:
+  image: cypress/base:10
+  stage: install
+  cache:
+    key: ${CI_COMMIT_REF_SLUG}
+    paths:
+      - .npm
+      - cache/Cypress
+      - node_modules
+  when: manual
+  #only:
+  #  changes:
+  #    - package.json    
+  #    - package-lock.json    
+  script:
+    - npm install
+
+test:
+  image: cypress/base:10
+  stage: test
+  cache:
+    key: ${CI_COMMIT_REF_SLUG}
+    paths:
+      - .npm
+      - cache/Cypress
+      - node_modules
+  script:
+    - npm run test
+
+build:
+  image: alicankustemur/gcloud-terraform:latest
+  stage: build
+  extends: .before_script_template
+  services:
+    - docker:19.03.8-dind
+  script:
+      - gcloud auth configure-docker --quiet
+      - docker build -t $IMAGE .
+      - docker push $IMAGE
+
+deploy:
+  image: alicankustemur/gcloud-terraform:latest
+  stage: deploy
+  extends: .before_script_template
+  script:
+      - gcloud container clusters get-credentials gke --region ${REGION}
+      - export RELEASE_VERSION=${CI_COMMIT_SHORT_SHA}
+      - export DEPLOYED=$(helm ls | grep ${CI_PROJECT_NAME} | wc -l | tr -d '[:space:]')
+      - 'sed -i "s/appVersion:.*/appVersion: ${RELEASE_VERSION}\n/" .helm/Chart.yaml'
+      - > 
+        if [ ${DEPLOYED} -eq 0 ]; then 
+          helm install ${CI_PROJECT_NAME} .helm --set service.loadBalancer.loadBalancerIP=${FRONTEND_EXTERNAL_IP},apiUrl=http://${BACKEND_EXTERNAL_IP};
+        else 
+          helm upgrade ${CI_PROJECT_NAME} .helm --set service.loadBalancer.loadBalancerIP=${FRONTEND_EXTERNAL_IP},apiUrl=http://${BACKEND_EXTERNAL_IP};
+        fi
+      - 'echo "Deployment successfully, visit: ${FRONTEND_URL}"'

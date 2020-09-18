@@ -1,0 +1,80 @@
+image: alicankustemur/gcloud-terraform
+
+stages:
+  - prerequisites
+  - terraform
+
+variables:
+  BUCKET_NAME: "${PROJECT}-tf-state"
+
+.prerequisites_before_script_template:
+  before_script:
+    - echo ${INFRA_ADMIN_CREDENTIALS} | base64 -d >> ./infra-admin-sa-credentials.json
+    - gcloud auth activate-service-account --key-file="./infra-admin-sa-credentials.json" --project=${PROJECT}
+    - gcloud config set core/project ${PROJECT}
+    - gcloud config set compute/region ${REGION}
+
+.terraform_before_script_template:
+  before_script:
+    - cd ./terraform
+    - echo ${TERRAFORM_CREDENTIALS} | base64 -d >> ./terraform-sa-credentials.json
+    - export GOOGLE_APPLICATION_CREDENTIALS=./terraform-sa-credentials.json
+
+0-create_terraform_service_account_credentials:
+  stage: prerequisites
+  when: manual
+  extends: .prerequisites_before_script_template
+  script:
+      - ./scripts/create_service_account_credentials.sh ${PROJECT} terraform ./terraform-sa-credentials.json
+      - echo "Add following value as variable TERRAFORM_CREDENTIALS named to GitLab group variables"
+      - cat ./terraform-sa-credentials.json | base64
+
+1-create_tf_state_bucket:
+  stage: prerequisites
+  when: manual
+  extends: .prerequisites_before_script_template
+  script:
+      - ./scripts/create_tf_state_bucket.sh ${PROJECT} terraform ${REGION} ${BUCKET_NAME}
+
+0-plan:
+  stage: terraform
+  extends: .terraform_before_script_template
+  only:
+    changes:
+      - terraform/*
+  script:
+      - > 
+        terraform init \
+          -backend-config="bucket=${BUCKET_NAME}"
+      - > 
+        terraform plan \
+          -var project="${PROJECT}" \
+          -var region="${REGION}" \
+
+1-apply:
+  stage: terraform
+  when: manual
+  extends: .terraform_before_script_template
+  script:
+      - > 
+        terraform init \
+          -backend-config="bucket=${BUCKET_NAME}"
+      - > 
+        terraform apply  \
+          -var project="${PROJECT}" \
+          -var region="${REGION}" \
+          --auto-approve
+
+2-destroy:
+  stage: terraform
+  when: manual
+  extends: .terraform_before_script_template
+  script:
+      - > 
+        terraform init \
+          -backend-config="bucket=${BUCKET_NAME}"
+      - > 
+        terraform destroy \
+          -var project="${PROJECT}" \
+          -var region="${REGION}" \
+          --auto-approve

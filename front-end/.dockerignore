@@ -1,0 +1,5 @@
+cypress*
+node_modules
+Dockerfile*
+.gitlab-ci.yml
+package*.json

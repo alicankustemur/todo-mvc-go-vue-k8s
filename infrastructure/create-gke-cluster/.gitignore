@@ -1,0 +1,13 @@
+# Local .terraform directories
+*.terraform
+**/.terraform/*
+# .tfstate files
+*.tfstate
+*.tfstate.*
+
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+service-account-admin-credentials.json
+terraform-gke-credentials.json

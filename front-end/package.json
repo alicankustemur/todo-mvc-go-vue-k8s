@@ -1,0 +1,20 @@
+{
+  "private": true,
+  "scripts": {
+    "cy:open": "cypress open",
+    "start": "node_modules/.bin/serve -p 3030",
+    "cy:run": "cypress run",
+    "test": "start-server-and-test start http://localhost:3030 cy:run"
+  },
+  "dependencies": {
+    "director": "^1.2.0",
+    "vue": "^2.1.8",
+    "todomvc-app-css": "^2.0.0",
+    "todomvc-common": "^1.0.1"
+  },
+  "devDependencies": {
+    "cypress": "^4.7.0",
+    "serve": "^11.3.2",
+    "start-server-and-test": "^1.11.0"
+  }
+}

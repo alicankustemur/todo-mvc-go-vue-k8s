@@ -1,0 +1,74 @@
+image: alicankustemur/gcloud-terraform:latest
+
+stages:
+  - install
+  - test
+  - build
+  - deploy
+
+variables:
+  DOCKER_HOST: tcp://docker:2375
+  IMAGE: "eu.gcr.io/${PROJECT}/${CI_PROJECT_NAME}:${CI_COMMIT_SHORT_SHA}"
+  
+.gcloud_login_before_script_template:
+  before_script:
+    - echo ${INFRA_ADMIN_CREDENTIALS} | base64 -d > ./infra-admin-credentials.json
+    - > 
+      gcloud auth activate-service-account \
+        --key-file="./infra-admin-credentials.json" \
+        --project=${PROJECT}
+    - gcloud config set core/project   ${PROJECT}
+    - gcloud config set compute/region ${REGION}
+
+build-go-echo-docker-image:
+  image: docker:19.03.8
+  stage: install
+  services:
+    - docker:19.03.8-dind
+  only:
+    changes:
+      - Dockerfile.go-echo
+      - go.mod
+      - go.sum
+  script:
+      - export IMAGE=alicankustemur/go-echo
+      - docker login -u $DOCKER_USERNAME -p $DOCKER_PASSWORD
+      - docker build -t $IMAGE -f Dockerfile.go-echo .
+      - docker push $IMAGE    
+
+test:
+  image: alicankustemur/go-echo
+  stage: test
+  cache:
+    paths:
+      - /apt-cache
+      - /go
+  script:
+    - cd src/todo
+    - go test -parallel 5 -cover -v
+
+build:
+  stage: build
+  services:
+    - docker:19.03.8-dind
+  extends: .gcloud_login_before_script_template  
+  script:
+      - gcloud auth configure-docker --quiet
+      - docker build -t $IMAGE .
+      - docker push $IMAGE
+
+deploy:
+  stage: deploy
+  extends: .gcloud_login_before_script_template
+  script:
+      - gcloud container clusters get-credentials gke --region ${REGION}
+      - export RELEASE_VERSION=${CI_COMMIT_SHORT_SHA}
+      - export DEPLOYED=$(helm ls | grep ${CI_PROJECT_NAME} | wc -l | tr -d '[:space:]')
+      - 'sed -i "s/appVersion:.*/appVersion: ${RELEASE_VERSION}\n/" .helm/Chart.yaml'
+      - > 
+        if [ ${DEPLOYED} -eq 0 ]; then 
+          helm install ${CI_PROJECT_NAME} .helm --set service.loadBalancer.loadBalancerIP=${BACKEND_EXTERNAL_IP}
+        else 
+          helm upgrade ${CI_PROJECT_NAME} .helm --set service.loadBalancer.loadBalancerIP=${BACKEND_EXTERNAL_IP}
+        fi
+      - 'echo "Deployment successfully, visit: http://${BACKEND_EXTERNAL_IP}/todos"'

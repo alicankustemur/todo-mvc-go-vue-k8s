@@ -1,0 +1,14 @@
+image: docker:19.03.8
+
+services:
+  - docker:19.03.8-dind
+
+variables:
+  IMAGE: "alicankustemur/gcloud-terraform:latest"
+
+build:
+  stage: build
+  script:
+      - docker build -t $IMAGE .
+      - docker login -u $DOCKER_USERNAME -p $DOCKER_PASSWORD
+      - docker push $IMAGE    
